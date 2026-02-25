@@ -8,6 +8,10 @@ from typing import Any, Optional
 
 import mujoco
 import numpy as np
+try:
+    import gymnasium as gym
+except ImportError:  # Optional unless using the Gymnasium adapter
+    gym = None
 
 # Make repo root importable when run as a script.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +34,11 @@ DEFAULT_ACTION_DIR = REPO_ROOT / "assets" / "action_groups" / "csv"
 class RewardConfig:
     dist_progress_scale: float = 4.0
     bearing_progress_scale: float = 0.5
-    kick_bonus: float = 10.0
+    approach_close_distance_m: float = 0.22
+    approach_close_scale: float = 0.20
+    goal_progress_scale: float = 10.0
+    kick_bonus: float = 4.0
+    goal_bonus: float = 25.0
     fall_penalty: float = 8.0
     time_penalty: float = 0.05
 
@@ -40,13 +48,14 @@ class BallConfig:
     spawn_x_range: tuple[float, float] = (0.26, 0.40)
     spawn_y_range: tuple[float, float] = (-0.08, 0.08)
     spawn_z_m: float = 0.04
+    radius_m: float = 0.04
     align_to_goal_y: bool = True
     goal_y_offset_range: tuple[float, float] = (-0.05, 0.05)
     kick_distance_thresh_m: float = 0.18
     kick_bearing_thresh_rad: float = math.radians(25.0)
     kick_speed_mps: float = 1.2
     drag_per_second: float = 1.8
-    success_move_thresh_m: float = 0.35
+    success_move_thresh_m: float = 0.35  # retained as a debug metric; not terminal reward target
 
 
 @dataclass
@@ -173,6 +182,7 @@ class AinexActionEnv:
         self._episode_kick_attempts = 0
         self._episode_kick_successes = 0
         self._episode_return = 0.0
+        self._episode_goal_scored = 0
         self._reset_count = 0
         # Per-action playback overrides help keep sensitive primitives (especially kicks)
         # from being over-amplified by the engine's global motion scaling.
@@ -351,6 +361,7 @@ class AinexActionEnv:
         self._episode_kick_attempts = 0
         self._episode_kick_successes = 0
         self._episode_return = 0.0
+        self._episode_goal_scored = 0
         self._randomize_goal(first_reset=(self._reset_count == 0))
 
         start_action = self.actions["ready"] if "ready" in self.actions else next(iter(self.actions.values()))
@@ -381,6 +392,7 @@ class AinexActionEnv:
         action_name = self.action_names[action_id]
         action = self.actions[action_name]
         prev_ball_xy = self._get_ball_xy().copy()
+        prev_ball_to_goal_dist = float(np.linalg.norm(prev_ball_xy - self.goal_pos_world[0:2]))
         if "kick" in action_name:
             self._episode_kick_attempts += 1
 
@@ -397,11 +409,17 @@ class AinexActionEnv:
         is_fallen = bool(obs_dict["is_fallen"] > 0.5)
         dist = float(obs_dict["ball_distance"])
         abs_bearing = abs(float(obs_dict["ball_bearing"]))
+        ball_to_goal_dist = self._ball_to_goal_distance()
 
         reward_dist = self.reward_cfg.dist_progress_scale * (self._last_ball_distance - dist)
         reward_bearing = self.reward_cfg.bearing_progress_scale * (self._last_ball_abs_bearing - abs_bearing)
+        if min(self._last_ball_distance, dist) <= self.reward_cfg.approach_close_distance_m:
+            reward_dist *= self.reward_cfg.approach_close_scale
+            reward_bearing *= self.reward_cfg.approach_close_scale
+        reward_goal_progress = self.reward_cfg.goal_progress_scale * (prev_ball_to_goal_dist - ball_to_goal_dist)
         reward_time = -self.reward_cfg.time_penalty
         reward_kick = 0.0
+        reward_goal_bonus = 0.0
         reward_fall = 0.0
 
         ball_moved = float(np.linalg.norm(self._get_ball_xy() - prev_ball_xy))
@@ -410,6 +428,7 @@ class AinexActionEnv:
         if kick_success:
             reward_kick += self.reward_cfg.kick_bonus
             self._episode_kick_successes += 1
+        goal_scored = self._is_goal_scored()
 
         terminated = False
         if not ok:
@@ -417,14 +436,22 @@ class AinexActionEnv:
         if is_fallen:
             terminated = True
             reward_fall -= self.reward_cfg.fall_penalty
-        if episode_ball_moved >= self.ball_cfg.success_move_thresh_m:
+        if goal_scored:
             terminated = True
-            if reward_kick <= 0.0:
-                reward_kick += self.reward_cfg.kick_bonus * 0.5
+            reward_goal_bonus += self.reward_cfg.goal_bonus
+            self._episode_goal_scored = 1
 
         truncated = self.step_count >= self.max_episode_steps and not terminated
 
-        reward = float(reward_dist + reward_bearing + reward_time + reward_kick + reward_fall)
+        reward = float(
+            reward_dist
+            + reward_bearing
+            + reward_goal_progress
+            + reward_time
+            + reward_kick
+            + reward_goal_bonus
+            + reward_fall
+        )
 
         self._last_ball_distance = dist
         self._last_ball_abs_bearing = abs_bearing
@@ -443,10 +470,13 @@ class AinexActionEnv:
                 "ball_moved_episode": episode_ball_moved,
                 "kick_attempted": "kick" in action_name,
                 "kick_success": kick_success,
+                "goal_scored": goal_scored,
                 "reward_dist": float(reward_dist),
                 "reward_bearing": float(reward_bearing),
+                "reward_goal_progress": float(reward_goal_progress),
                 "reward_time": float(reward_time),
                 "reward_kick": float(reward_kick),
+                "reward_goal_bonus": float(reward_goal_bonus),
                 "reward_fall": float(reward_fall),
                 "episode_metrics": self._episode_metrics(),
             }
@@ -485,6 +515,22 @@ class AinexActionEnv:
 
     def _ball_to_goal_distance(self) -> float:
         return float(np.linalg.norm(self._get_ball_xy() - self.goal_pos_world[0:2]))
+
+    def _get_ball_pos_xyz(self) -> np.ndarray:
+        if self._ball_body_id is not None:
+            return np.array(self.data.xpos[self._ball_body_id, 0:3], dtype=float)
+        return np.array(self.virtual_ball_pos[0:3], dtype=float)
+
+    def _is_goal_scored(self) -> bool:
+        ball = self._get_ball_pos_xyz()
+        gx, gy, gz = [float(v) for v in self.goal_pos_world]
+        r = float(self.ball_cfg.radius_m)
+        # Goal plane is at x ~= gx, robot attacks +x direction.
+        crossed_plane = float(ball[0]) >= (gx - r)
+        within_width = abs(float(ball[1]) - gy) <= (self.goal_cfg.width_half_m + r)
+        below_bar = float(ball[2]) <= (gz + self.goal_cfg.height_half_m + r)
+        above_ground = float(ball[2]) >= -r
+        return bool(crossed_plane and within_width and below_bar and above_ground)
 
     def _base_up_z(self) -> float:
         quat = np.array(self.data.qpos[3:7], dtype=float)
@@ -558,6 +604,7 @@ class AinexActionEnv:
             "goal_pos_xyz": self.goal_pos_world.copy(),
             "ball_to_goal_distance": self._ball_to_goal_distance(),
             "is_fallen": bool(obs_dict["is_fallen"] > 0.5),
+            "goal_scored": self._is_goal_scored(),
             "episode_metrics": self._episode_metrics(),
         }
         return info
@@ -619,6 +666,7 @@ class AinexActionEnv:
             "min_abs_ball_bearing": float(self._episode_min_abs_bearing),
             "kick_attempts": float(self._episode_kick_attempts),
             "kick_successes": float(self._episode_kick_successes),
+            "goal_scored": float(self._episode_goal_scored),
             "ball_to_goal_start": float(self._episode_start_ball_to_goal_dist),
             "ball_to_goal_now": float(self._ball_to_goal_distance()),
             "ball_to_goal_progress": float(self._episode_start_ball_to_goal_dist - self._ball_to_goal_distance()),
@@ -685,7 +733,10 @@ class AinexActionEnv:
         return list(self.action_names)
 
 
-class AinexGymnasiumEnv:
+_GymBase = gym.Env if gym is not None else object
+
+
+class AinexGymnasiumEnv(_GymBase):
     """
     Gymnasium-compatible adapter around AinexActionEnv.
 
@@ -696,9 +747,10 @@ class AinexGymnasiumEnv:
     metadata = {"render_modes": ["human", None]}
 
     def __init__(self, **ainex_env_kwargs):
+        if gym is not None:
+            super().__init__()
         self.core = AinexActionEnv(**ainex_env_kwargs)
         try:
-            import gymnasium as gym  # noqa: F401
             from gymnasium import spaces
         except ImportError as exc:
             raise ImportError(

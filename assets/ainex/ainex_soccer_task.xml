@@ -371,7 +371,7 @@
       <geom name="soccer_ball_geom"
             type="sphere"
             size="0.04"
-            mass="0.070"
+            mass="0.090"
             rgba="1.0 0.55 0.05 1"
             friction="0.75 0.015 0.0010"
             solref="0.02 1"

@@ -86,6 +86,7 @@ class ActionGroupEngine:
 
         # Toggle safety checks
         safety_enabled: bool = False,
+        verbose: bool = True,
 
         # Motion scaling in PULSE space, applied relative to the first frame.
         # 1.0 = no scaling, 2.0 doubles deviations from frame 0, etc.
@@ -114,6 +115,7 @@ class ActionGroupEngine:
 
         self.sleep = bool(sleep)
         self.safety_enabled = bool(safety_enabled)
+        self.verbose = bool(verbose)
 
         self.motion_scale = float(motion_scale)
 
@@ -366,7 +368,8 @@ class ActionGroupEngine:
 
         z = float(self.data.qpos[2])
         if z < self.abort_min_z:
-            print(f"[ABORT] base z too low: {z:.3f} < {self.abort_min_z:.3f}")
+            if self.verbose:
+                print(f"[ABORT] base z too low: {z:.3f} < {self.abort_min_z:.3f}")
             return False
 
         qw, qx, qy, qz = [float(x) for x in self.data.qpos[3:7]]
@@ -376,7 +379,8 @@ class ActionGroupEngine:
 
         up_z = float(mat[8])
         if up_z < self.abort_min_up_z:
-            print(f"[ABORT] upright too low: up_z={up_z:.3f} < {self.abort_min_up_z:.3f}")
+            if self.verbose:
+                print(f"[ABORT] upright too low: up_z={up_z:.3f} < {self.abort_min_up_z:.3f}")
             return False
 
         return True
@@ -414,7 +418,7 @@ class ActionGroupEngine:
                     q = float(self.data.qpos[qadr])
                     u = float(self.data.ctrl[act_idx])
                     errs.append(abs(u - q))
-                if errs:
+                if errs and self.verbose:
                     print(
                         f"[TRACK] step {k+1}/{steps}  "
                         f"mean|ctrl-q|={float(np.mean(errs)):.4f}  "
@@ -424,7 +428,7 @@ class ActionGroupEngine:
                 af = np.array(self.data.actuator_force, dtype=float)
                 atol = 1e-2
                 sat = (np.isclose(af, fr_hi, atol=atol) | np.isclose(af, fr_lo, atol=atol))
-                if sat.any():
+                if sat.any() and self.verbose:
                     idx = np.where(sat)[0]
                     print(
                         f"[SAT] step {k+1}/{steps}  "
@@ -432,7 +436,7 @@ class ActionGroupEngine:
                         f"forces={af[idx].round(3).tolist()}"
                     )
 
-                if self._has_freejoint:
+                if self._has_freejoint and self.verbose:
                     px, py, pz = [float(v) for v in self.data.qpos[0:3]]
                     qw, qx, qy, qz = [float(v) for v in self.data.qpos[3:7]]
                     print(
@@ -478,7 +482,8 @@ class ActionGroupEngine:
         ctrl_now = np.array(self.data.ctrl, dtype=float)
 
         delta0 = np.abs(ctrl_first - ctrl_now)
-        print(f"[CTRLΔ] (start->first) mean={float(delta0.mean()):.4f}  max={float(delta0.max()):.4f}")
+        if self.verbose:
+            print(f"[CTRLΔ] (start->first) mean={float(delta0.mean()):.4f}  max={float(delta0.max()):.4f}")
 
         if not self._ramp_ctrl(ctrl_now, ctrl_first, self.transition_ms, viewer=viewer):
             return False
@@ -501,10 +506,11 @@ class ActionGroupEngine:
             ctrl_b = self.servo_frame_to_ctrl(pulses_b_s)
 
             delta = np.abs(ctrl_b - ctrl_a)
-            print(
-                f"[CTRLΔ] frame {i}->{i+1}  mean={float(delta.mean()):.4f}  "
-                f"max={float(delta.max()):.4f}  hold_ms={int(frame_a['hold_ms'])}"
-            )
+            if self.verbose:
+                print(
+                    f"[CTRLΔ] frame {i}->{i+1}  mean={float(delta.mean()):.4f}  "
+                    f"max={float(delta.max()):.4f}  hold_ms={int(frame_a['hold_ms'])}"
+                )
 
             if not self._ramp_ctrl(ctrl_a, ctrl_b, int(frame_a["hold_ms"]), viewer=viewer):
                 return False
