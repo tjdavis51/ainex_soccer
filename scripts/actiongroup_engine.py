@@ -89,7 +89,7 @@ class ActionGroupEngine:
 
         # Motion scaling in PULSE space, applied relative to the first frame.
         # 1.0 = no scaling, 2.0 doubles deviations from frame 0, etc.
-        motion_scale: float = 3.0,
+        motion_scale: float = 2.5,
 
         # Optional fine per-servo gain (multiplicative on delta-pulse around frame0)
         # Length 22 in ID order. 1.0 means unchanged.
