@@ -1,0 +1,33 @@
+AINex Soccer Project - Final Report (Draft)
+
+Project objective:
+Train and deploy a policy that selects existing AINex action groups to approach a ball and kick it into a goal, with a sim-to-real workflow.
+
+What was implemented:
+- MuJoCo simulation with tuned robot/foot/ball/goal setup.
+- Action-group playback engine integration for discrete action selection.
+- Gymnasium RL environment and PPO training pipeline.
+- Simulation baseline controller and policy replay tooling.
+- Real runtime modules for camera-based perception and ROS action publishing.
+- Real policy execution loop on AINex host (outside Docker, with Docker ROS bridge).
+
+Current result:
+- The system can run a trained policy on the real robot.
+- It can detect both goal and ball when color ranges are tuned.
+- Practical performance depends on lighting consistency and color-threshold tuning.
+
+Known limitations:
+- Ball/goal recognition is still brittle to environment changes.
+- Real locomotion quality is limited by prepackaged action groups.
+- Turning/stepping consistency varies across runs.
+
+Recommended next steps:
+1. Replace/augment HSV recognition with stronger detection methods.
+2. Create improved custom action groups for stable stepping/turning.
+3. Retrain PPO with those improved action groups.
+4. Add stronger real-state/proprioceptive integration and broader robustness testing.
+
+End state at handoff:
+- Repository includes runnable sim and real scripts.
+- Final command sets are saved under docs/final_run_commands.
+- Project is in a stable checkpoint suitable for submission and future continuation.

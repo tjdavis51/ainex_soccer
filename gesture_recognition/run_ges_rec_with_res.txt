@@ -1,0 +1,11 @@
+source ~/mp_venv/bin/activate
+
+python3 ~/gesture_recognition/ainex_gesture_rec_with_res.py \
+  --model ~/gesture_recognition/FISTBUMP_HIGHFIVE_HANDSHAKE.task \
+  --url "http://192.168.149.1:8080/snapshot?topic=/camera/image_raw" \
+  --max-fps 3 \
+  --min-score 0.25 \
+  --trigger-score 0.50 \
+  --persist-sec 2.0 \
+  --cooldown-sec 5.0 \
+  --show

@@ -1,0 +1,53 @@
+# Run on AINex host OS (outside Docker), after SSH in.
+
+cd /home/pi/ainex_soccer
+source /home/pi/ainex_soccer/.venv_real/bin/activate
+mkdir -p /home/pi/ainex_soccer/logs
+
+# 1) Camera sanity check
+curl "http://127.0.0.1:8080/snapshot?topic=/camera/image_raw" -o /tmp/cam.jpg
+
+# 2) Perception tuning check (example ranges)
+python /home/pi/ainex_soccer/scripts/real/perception_camera.py \
+  --url "http://127.0.0.1:8080/snapshot?topic=/camera/image_raw" \
+  --steps 200 --max-fps 6 \
+  --ball-hsv-low "67,75,185" \
+  --ball-hsv-high "82,170,255" \
+  --ball-hsv-alt-low "67,35,185" \
+  --ball-hsv-alt-high "85,95,255" \
+  --goal-hsv-low "20,120,80" \
+  --goal-hsv-high "40,255,255"
+
+# 3) Calibrate ball distance at known distance (example 0.40m)
+python /home/pi/ainex_soccer/scripts/real/calibrate_ball_distance.py \
+  --url "http://127.0.0.1:8080/snapshot?topic=/camera/image_raw" \
+  --true-distance 0.40 \
+  --samples 120
+
+# 4) Dry-run policy (no action publishing)
+python /home/pi/ainex_soccer/scripts/real/run_policy_real.py \
+  --model /home/pi/ainex_soccer/policies/ppo_real_bridge_100k/final_model.zip \
+  --url "http://127.0.0.1:8080/snapshot?topic=/camera/image_raw" \
+  --episodes 1 --max-steps 40 \
+  --dry-run-actions \
+  --ball-distance-scale 1.00
+
+# 5) Live run
+# First find ROS container id:
+docker ps
+
+python /home/pi/ainex_soccer/scripts/real/run_policy_real.py \
+  --model /home/pi/ainex_soccer/policies/ppo_real_bridge_100k/final_model.zip \
+  --url "http://127.0.0.1:8080/snapshot?topic=/camera/image_raw" \
+  --container-id <CONTAINER_ID> \
+  --episodes 2 --max-steps 60 \
+  --kick-gate-distance 0.25 \
+  --kick-gate-bearing-deg 18 \
+  --ball-distance-scale 1.00 \
+  --ball-hsv-low "67,75,185" \
+  --ball-hsv-high "82,170,255" \
+  --ball-hsv-alt-low "67,35,185" \
+  --ball-hsv-alt-high "85,95,255" \
+  --goal-hsv-low "20,120,80" \
+  --goal-hsv-high "40,255,255" \
+  --csv-log /home/pi/ainex_soccer/logs/real_policy.csv

@@ -1,0 +1,10 @@
+{
+  "stand": "stand",
+  "ready": "walk_ready",
+  "step_forward": "go_forward_low",
+  "turn_left": "go_turn_left",
+  "turn_right": "go_turn_right",
+  "kick_left": "left_shot",
+  "kick_right": "right_shot",
+  "kick": "left_shot"
+}
