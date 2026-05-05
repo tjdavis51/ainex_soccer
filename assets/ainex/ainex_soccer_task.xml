@@ -110,7 +110,7 @@
          Pair-specific settings override generic geom friction so the ball can
          roll on the floor, but still have enough grip to feel realistic. -->
     <pair geom1="soccer_ball_geom" geom2="floor"
-          friction="0.52 0.010 0.00070"
+          friction="0.48 0.008 0.00060"
           condim="6"
           solref="0.02 1"
           solimp="0.85 0.95 0.001"/>
@@ -367,11 +367,11 @@
     <!-- Soccer task props -->
     <body name="soccer_ball" pos="0.45 0 0.04">
       <!-- Low damping helps the ball keep rolling once kicked. -->
-      <joint type="free" damping="0.006" armature="0"/>
+      <joint type="free" damping="0.005" armature="0"/>
       <geom name="soccer_ball_geom"
             type="sphere"
             size="0.04"
-            mass="0.090"
+            mass="0.085"
             rgba="1.0 0.55 0.05 1"
             friction="0.75 0.015 0.0010"
             solref="0.02 1"

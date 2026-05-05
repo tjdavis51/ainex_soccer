@@ -1,0 +1,23 @@
+# Run from repo root: /Users/tjdavis/Desktop/CS485/ainex_soccer
+
+# 1) Activate local venv
+source .venv/bin/activate
+
+# 2) Baseline behavior in simulation
+# Viewer mode (macOS): use mjpython
+mjpython scripts/run_baseline.py --viewer --episodes 1 --max-steps 40
+
+# 3) PPO training (example)
+python scripts/train_ppo.py \
+  --timesteps 100000 \
+  --run-name ppo_final_100k \
+  --n-envs 0 \
+  --vec-env auto
+
+# 4) Policy replay in simulation
+# Viewer mode on macOS: use mjpython
+mjpython scripts/play_policy.py \
+  --model policies/ppo_final_100k/final_model.zip \
+  --viewer \
+  --episodes 3 \
+  --max-steps 80

@@ -37,7 +37,14 @@ class RewardConfig:
     approach_close_distance_m: float = 0.22
     approach_close_scale: float = 0.20
     goal_progress_scale: float = 10.0
-    kick_bonus: float = 4.0
+    kick_bonus: float = 6.0
+    kick_contact_move_thresh_m: float = 0.04
+    kick_zone_distance_m: float = 0.17
+    kick_zone_bearing_rad: float = math.radians(12.0)
+    kick_whiff_penalty: float = 1.5
+    kick_misuse_penalty_scale: float = 2.0
+    no_kick_in_zone_penalty: float = 0.2
+    anti_shuffle_penalty_scale: float = 2.0
     goal_bonus: float = 25.0
     fall_penalty: float = 8.0
     time_penalty: float = 0.05
@@ -187,9 +194,9 @@ class AinexActionEnv:
         # Per-action playback overrides help keep sensitive primitives (especially kicks)
         # from being over-amplified by the engine's global motion scaling.
         self.action_motion_scale_overrides: dict[str, float] = {
-            "kick_left": 1.0,
-            "kick_right": 1.0,
-            "kick": 1.0,
+            "kick_left": 1.15,
+            "kick_right": 1.15,
+            "kick": 1.15,
         }
         self.action_transition_ms_overrides: dict[str, int] = {
             "kick_left": max(700, int(self.engine.transition_ms)),
@@ -421,13 +428,37 @@ class AinexActionEnv:
         reward_kick = 0.0
         reward_goal_bonus = 0.0
         reward_fall = 0.0
+        reward_kick_policy = 0.0
 
         ball_moved = float(np.linalg.norm(self._get_ball_xy() - prev_ball_xy))
         episode_ball_moved = float(np.linalg.norm(self._get_ball_xy() - self._episode_start_ball_xy))
-        kick_success = bool(("kick" in action_name) and ball_moved > 0.05)
-        if kick_success:
-            reward_kick += self.reward_cfg.kick_bonus
-            self._episode_kick_successes += 1
+        pre_in_kick_zone = bool(
+            self._last_ball_distance <= self.reward_cfg.kick_zone_distance_m
+            and self._last_ball_abs_bearing <= self.reward_cfg.kick_zone_bearing_rad
+        )
+        kick_success = bool(("kick" in action_name) and ball_moved > self.reward_cfg.kick_contact_move_thresh_m)
+        if "kick" in action_name:
+            if kick_success and pre_in_kick_zone:
+                reward_kick += self.reward_cfg.kick_bonus
+                self._episode_kick_successes += 1
+            elif kick_success and (not pre_in_kick_zone):
+                # Some contact happened, but from a poor kick pose.
+                reward_kick += self.reward_cfg.kick_bonus * 0.25
+            else:
+                reward_kick_policy -= self.reward_cfg.kick_whiff_penalty
+
+            if not pre_in_kick_zone:
+                overshoot = max(0.0, self._last_ball_distance - self.reward_cfg.kick_zone_distance_m)
+                reward_kick_policy -= self.reward_cfg.kick_misuse_penalty_scale * overshoot
+        else:
+            # Agent is in a good kick pose but chose something else.
+            if pre_in_kick_zone:
+                reward_kick_policy -= self.reward_cfg.no_kick_in_zone_penalty
+
+        goal_progress = float(prev_ball_to_goal_dist - ball_to_goal_dist)
+        # Discourage "shuffle into goal" with non-kick contacts near the ball.
+        if ("kick" not in action_name) and (self._last_ball_distance < 0.22) and (goal_progress > 0.0):
+            reward_kick_policy -= self.reward_cfg.anti_shuffle_penalty_scale * goal_progress
         goal_scored = self._is_goal_scored()
 
         terminated = False
@@ -450,6 +481,7 @@ class AinexActionEnv:
             + reward_time
             + reward_kick
             + reward_goal_bonus
+            + reward_kick_policy
             + reward_fall
         )
 
@@ -477,6 +509,7 @@ class AinexActionEnv:
                 "reward_time": float(reward_time),
                 "reward_kick": float(reward_kick),
                 "reward_goal_bonus": float(reward_goal_bonus),
+                "reward_kick_policy": float(reward_kick_policy),
                 "reward_fall": float(reward_fall),
                 "episode_metrics": self._episode_metrics(),
             }

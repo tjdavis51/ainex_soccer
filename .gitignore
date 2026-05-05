@@ -9,7 +9,21 @@ venv/
 
 # OS junk
 .DS_Store
+**/.DS_Store
 
 # Editor
 .vscode/
 .idea/
+
+# Build/test/cache artifacts
+**/__pycache__/
+*.log
+
+# Local training/runtime artifacts (do not commit large binaries)
+runs/
+wheelhouse/
+policies/*
+!policies/.gitkeep
+
+# Optional local logs folder
+logs/
